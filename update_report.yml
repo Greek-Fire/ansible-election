@@ -1,0 +1,55 @@
+- hosts: all 
+  gather_facts: 0 
+  tasks:
+  - setup:
+      gather_subset: min
+    register: tt
+
+  - command: "last reboot | head -1"
+    register: lr
+
+  - slurp:
+      src: /var/log/yum.log
+    register: slurpy
+
+  - set_fact:
+      lr: "{{ lr['stdout'].split() }}"
+
+  - set_fact:
+      vr: "{{ vr.split('\n\') }}"
+      rb: "{{ lr[5] | trim }} {{lr[6:7] | first }}"
+      kernel:   "{{ lr[3] | trim }}"
+      hostname: "{{ tt['ansible_facts']['ansible_fqdn'] }}"
+    vars:
+      vr: "{{ slurpy['content'] | b64decode }}"
+
+  - set_fact:
+      election_res: "{{ elect_list | election }}" 
+    vars:
+      elect_list: |
+        {% set lis = [] %}
+        {% for r in vr %}
+        {% if 'Updated' in r -%}
+        {% set x = r[:6] %}
+        {{ lis.append(x) }}
+        {%- endif %}
+        {% endfor %}
+        {{ lis[-10:] }}
+
+  - set_fact: 
+      list: "{{ hostname }},{{ kernel }},{{ rb }},{{ election_res }}"
+
+  - debug:
+      var: list
+
+  - template:
+      src: update_report.j2
+      dest: /tmp/temp
+    run_once: true 
+    delegate_to: localhost
+
+  - lineinfile:
+      path: /tmp/temp
+      line: "{{ list }}"
+      state: present
+    delegate_to: sat 
